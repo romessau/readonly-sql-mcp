@@ -10,6 +10,30 @@ def test_requires_existing_database(tmp_path: Path) -> None:
         SQLiteAdapter(tmp_path / "missing.sqlite")
 
 
+def test_lists_tables_and_views(adapter: SQLiteAdapter) -> None:
+    assert adapter.list_tables() == [
+        {"name": "customers", "type": "table", "row_count": None},
+        {"name": "order_totals", "type": "view", "row_count": None},
+        {"name": "orders", "type": "table", "row_count": None},
+    ]
+
+
+def test_describes_table(adapter: SQLiteAdapter) -> None:
+    description = adapter.describe_table("orders")
+    assert description["columns"][0]["name"] == "id"
+    assert description["foreign_keys"] == [
+        {"column": "customer_id", "referenced_table": "customers", "referenced_column": "id"}
+    ]
+    assert description["indexes"] == [
+        {"name": "orders_customer_idx", "unique": False, "columns": ["customer_id"]}
+    ]
+
+
+def test_rejects_unknown_table(adapter: SQLiteAdapter) -> None:
+    with pytest.raises(DatabaseError, match="not found"):
+        adapter.describe_table("unknown")
+
+
 def test_runs_read_query(adapter: SQLiteAdapter) -> None:
     result = adapter.run_query("SELECT id, name FROM customers ORDER BY id", 1)
     assert result["columns"] == ["id", "name"]
