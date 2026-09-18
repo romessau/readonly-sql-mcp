@@ -8,8 +8,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
 from readonly_sql_mcp.config import Settings
-from readonly_sql_mcp.db.base import DatabaseAdapter, TableDescription, TableInfo
+from readonly_sql_mcp.db.base import DatabaseAdapter, QueryResult, TableDescription, TableInfo
 from readonly_sql_mcp.db.sqlite import DatabaseError, SQLiteAdapter
+from readonly_sql_mcp.security import QueryValidationError, validate_query
 
 
 def _tool_error(message: str) -> NoReturn:
@@ -35,6 +36,14 @@ def create_server(settings: Settings, adapter: DatabaseAdapter | None = None) ->
         try:
             return database.describe_table(name)
         except DatabaseError as exc:
+            _tool_error(str(exc))
+
+    @mcp.tool()
+    def run_query(sql: str) -> QueryResult:
+        """Run one validated SELECT statement."""
+        try:
+            return database.run_query(validate_query(sql), settings.row_limit)
+        except (QueryValidationError, DatabaseError) as exc:
             _tool_error(str(exc))
 
     return mcp
