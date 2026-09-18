@@ -14,7 +14,7 @@ from readonly_sql_mcp.server import create_server
 async def test_exposes_schema_tools(database_path: Path, adapter: SQLiteAdapter) -> None:
     server = create_server(Settings(database_path), adapter)
     tools = await server.list_tools()
-    assert {tool.name for tool in tools} == {"list_tables", "describe_table"}
+    assert {tool.name for tool in tools} == {"list_tables", "describe_table", "run_query"}
 
 
 @pytest.mark.anyio
@@ -22,3 +22,10 @@ async def test_describe_tool_has_safe_error(database_path: Path, adapter: SQLite
     server = create_server(Settings(database_path), adapter)
     with pytest.raises(ToolError, match="not found"):
         await server.call_tool("describe_table", {"name": "missing"})
+
+
+@pytest.mark.anyio
+async def test_query_tool_rejects_writes(database_path: Path, adapter: SQLiteAdapter) -> None:
+    server = create_server(Settings(database_path), adapter)
+    with pytest.raises(ToolError, match="SELECT"):
+        await server.call_tool("run_query", {"sql": "DELETE FROM customers"})
