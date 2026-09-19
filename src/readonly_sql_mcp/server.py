@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import sys
 from typing import NoReturn
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from readonly_sql_mcp.config import Settings
+from readonly_sql_mcp.config import Settings, parse_args
 from readonly_sql_mcp.db.base import DatabaseAdapter, QueryResult, TableDescription, TableInfo
 from readonly_sql_mcp.db.sqlite import DatabaseError, SQLiteAdapter
 from readonly_sql_mcp.security import QueryValidationError, validate_query
@@ -47,3 +48,17 @@ def create_server(settings: Settings, adapter: DatabaseAdapter | None = None) ->
             _tool_error(str(exc))
 
     return mcp
+
+
+def main() -> None:
+    """Run the server over standard input and output."""
+    try:
+        settings = parse_args()
+        create_server(settings).run(transport="stdio")
+    except DatabaseError:
+        print("unable to open database", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()

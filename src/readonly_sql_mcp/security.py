@@ -10,17 +10,39 @@ class QueryValidationError(ValueError):
     """SQL does not meet the server's read-only policy."""
 
 
+MAX_QUERY_LENGTH = 50_000
+
+_DANGEROUS_FUNCTIONS = frozenset(
+    {
+        "load_extension",
+        "readfile",
+        "sqlite3_load_extension",
+        "sqlite_load_extension",
+        "writefile",
+    }
+)
+
 _FORBIDDEN_NODES = (
+    exp.Alter,
     exp.Attach,
     exp.Command,
     exp.Copy,
+    exp.Create,
     exp.Delete,
+    exp.Detach,
+    exp.Drop,
     exp.Insert,
     exp.Into,
     exp.Merge,
     exp.Pragma,
+    exp.Transaction,
     exp.Update,
 )
+
+
+def is_pragma_name(name: str) -> bool:
+    """Return whether a normalized SQL name exposes SQLite pragma data."""
+    return name.lower().startswith("pragma_")
 
 
 def _function_name(node: exp.Func) -> str:
@@ -29,8 +51,24 @@ def _function_name(node: exp.Func) -> str:
     return node.key.lower()
 
 
+def _referenced_names(statement: exp.Expression) -> list[str]:
+    names: list[str] = []
+    for table in statement.find_all(exp.Table):
+        if table.name:
+            names.append(table.name.lower())
+        this = table.this
+        if isinstance(this, exp.Func):
+            names.append(_function_name(this))
+    for function in statement.find_all(exp.Func):
+        names.append(_function_name(function))
+    return names
+
+
 def validate_query(sql: str, dialect: str = "sqlite") -> str:
-    """Require exactly one SELECT and reject dangerous AST constructs."""
+    """Require one read-only query and reject dangerous AST constructs."""
+    # Bound parser work before building an AST from untrusted client input.
+    if len(sql) > MAX_QUERY_LENGTH:
+        raise QueryValidationError("query exceeds the maximum length")
     candidate = sql.strip()
     try:
         statements = [
@@ -48,8 +86,10 @@ def validate_query(sql: str, dialect: str = "sqlite") -> str:
         raise QueryValidationError("query must be a SELECT statement")
     if any(statement.find(node_type) is not None for node_type in _FORBIDDEN_NODES):
         raise QueryValidationError("query contains a forbidden operation")
-    if any(
-        _function_name(function) == "load_extension" for function in statement.find_all(exp.Func)
-    ):
-        raise QueryValidationError("query calls a forbidden function")
+
+    for name in _referenced_names(statement):
+        if is_pragma_name(name):
+            raise QueryValidationError("query contains a forbidden operation")
+        if name in _DANGEROUS_FUNCTIONS:
+            raise QueryValidationError("query calls a forbidden function")
     return candidate
