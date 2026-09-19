@@ -18,6 +18,15 @@ async def test_exposes_schema_tools(database_path: Path, adapter: SQLiteAdapter)
 
 
 @pytest.mark.anyio
+async def test_calls_schema_and_query_tools(database_path: Path, adapter: SQLiteAdapter) -> None:
+    server = create_server(Settings(database_path), adapter)
+    _, tables = await server.call_tool("list_tables", {})
+    _, result = await server.call_tool("run_query", {"sql": "SELECT 1 AS value"})
+    assert tables
+    assert result["rows"] == [[1]]
+
+
+@pytest.mark.anyio
 async def test_describe_tool_has_safe_error(database_path: Path, adapter: SQLiteAdapter) -> None:
     server = create_server(Settings(database_path), adapter)
     with pytest.raises(ToolError, match="not found"):
