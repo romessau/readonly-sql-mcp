@@ -39,6 +39,8 @@ _FORBIDDEN_NODES = (
     exp.Update,
 )
 
+_COMPOUND_NODES = (exp.Union, exp.Intersect, exp.Except)
+
 
 def is_pragma_name(name: str) -> bool:
     """Return whether a normalized SQL name exposes SQLite pragma data."""
@@ -49,6 +51,27 @@ def _function_name(node: exp.Func) -> str:
     if isinstance(node, exp.Anonymous):
         return node.name.lower()
     return node.key.lower()
+
+
+def _unwrap(node: exp.Expression) -> exp.Expression:
+    current = node
+    while isinstance(current, exp.Subquery) and current.this is not None:
+        current = current.this
+    return current
+
+
+def _is_read_shape(node: exp.Expression) -> bool:
+    query = _unwrap(node)
+    if isinstance(query, _COMPOUND_NODES):
+        left = query.this
+        right = query.args.get("expression")
+        return (
+            isinstance(left, exp.Expression)
+            and isinstance(right, exp.Expression)
+            and _is_read_shape(left)
+            and _is_read_shape(right)
+        )
+    return isinstance(query, (exp.Select, exp.Values))
 
 
 def _referenced_names(statement: exp.Expression) -> list[str]:
@@ -82,7 +105,7 @@ def validate_query(sql: str, dialect: str = "sqlite") -> str:
         raise QueryValidationError("query must contain exactly one statement")
 
     statement = statements[0]
-    if not isinstance(statement, exp.Select):
+    if not _is_read_shape(statement):
         raise QueryValidationError("query must be a SELECT statement")
     if any(statement.find(node_type) is not None for node_type in _FORBIDDEN_NODES):
         raise QueryValidationError("query contains a forbidden operation")
