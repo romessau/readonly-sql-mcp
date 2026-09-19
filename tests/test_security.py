@@ -75,6 +75,12 @@ def test_rejects_pragma_relations(sql: str) -> None:
         "SELECT 'not; a; statement' AS text",
         "SELECT 1; -- one trailing delimiter is valid",
         "SELECT 'DELETE FROM customers' AS harmless_text",
+        "SELECT 1 UNION SELECT 2",
+        "SELECT 1 UNION ALL SELECT 2",
+        "SELECT 1 INTERSECT SELECT 1",
+        "SELECT 1 EXCEPT SELECT 2",
+        "VALUES (1), (2)",
+        "(SELECT 1)",
         "SELECT COUNT(*) FROM customers",
     ],
 )
