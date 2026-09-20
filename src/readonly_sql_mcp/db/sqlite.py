@@ -110,7 +110,8 @@ class SQLiteAdapter:
                     if first.isdigit():
                         name = str(row["tbl"])
                         value = int(first)
-                        estimates[name] = value
+                        previous = estimates.get(name)
+                        estimates[name] = value if previous is None else max(previous, value)
             return [
                 TableInfo(
                     name=str(row["name"]),
@@ -172,13 +173,15 @@ class SQLiteAdapter:
 
     def run_query(self, sql: str, row_limit: int) -> QueryResult:
         """Execute SQL with a time budget and bounded result materialization."""
+        if row_limit < 1:
+            raise DatabaseError("row limit must be positive")
         _reject_connection_escapes(sql)
         deadline = time.monotonic() + self._timeout_ms / 1_000
         self._connection.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1_000)
         try:
             cursor = self._connection.execute(sql)
             columns = [item[0] for item in cursor.description or []]
-            rows = [list(row) for row in cursor.fetchall()]
+            raw_rows = cursor.fetchmany(row_limit + 1)
         except sqlite3.OperationalError as exc:
             if "interrupted" in str(exc).lower():
                 raise QueryTimeoutError("query exceeded the configured time limit") from None
@@ -189,7 +192,10 @@ class SQLiteAdapter:
             self._connection.set_progress_handler(None, 0)
             with suppress(sqlite3.Error):
                 self._connection.execute("PRAGMA query_only = ON")
-        return QueryResult(columns=columns, rows=rows, truncated=False, message=None)
+        truncated = len(raw_rows) > row_limit
+        rows = [list(row) for row in raw_rows[:row_limit]]
+        message = f"Result truncated at {row_limit} rows." if truncated else None
+        return QueryResult(columns=columns, rows=rows, truncated=truncated, message=message)
 
     def close(self) -> None:
         """Close the database connection."""
