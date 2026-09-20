@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -37,8 +38,32 @@ def test_rejects_unknown_table(adapter: SQLiteAdapter) -> None:
 def test_runs_read_query(adapter: SQLiteAdapter) -> None:
     result = adapter.run_query("SELECT id, name FROM customers ORDER BY id", 1)
     assert result["columns"] == ["id", "name"]
-    assert result["rows"] == [[1, "Ada"], [2, "Grace"]]
-    assert result["truncated"] is False
+    assert result["rows"] == [[1, "Ada"]]
+    assert result["truncated"] is True
+    assert result["message"] == "Result truncated at 1 rows."
+
+
+@pytest.mark.parametrize(
+    ("sql", "limit", "row_count", "truncated"),
+    [
+        ("SELECT id FROM customers WHERE 0", 2, 0, False),
+        ("SELECT id FROM customers ORDER BY id", 2, 2, False),
+        ("SELECT id FROM orders ORDER BY id", 2, 2, True),
+    ],
+)
+def test_row_cap_boundaries(
+    adapter: SQLiteAdapter, sql: str, limit: int, row_count: int, truncated: bool
+) -> None:
+    result = adapter.run_query(sql, limit)
+    assert len(result["rows"]) == row_count
+    assert result["truncated"] is truncated
+    assert (result["message"] is not None) is truncated
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_rejects_nonpositive_row_limit(adapter: SQLiteAdapter, limit: int) -> None:
+    with pytest.raises(DatabaseError, match="positive"):
+        adapter.run_query("SELECT 1", limit)
 
 
 def test_database_is_read_only(adapter: SQLiteAdapter) -> None:
@@ -99,6 +124,24 @@ def test_rejects_non_sqlite_files_without_leaking_path(tmp_path: Path, contents:
     with pytest.raises(DatabaseError, match="unable to open database") as caught:
         SQLiteAdapter(path)
     assert str(path) not in str(caught.value)
+
+
+def test_uses_maximum_statistical_estimate(tmp_path: Path) -> None:
+    path = tmp_path / "statistics.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        "CREATE TABLE items(a INTEGER, b INTEGER);"
+        "CREATE INDEX items_a ON items(a);"
+        "CREATE INDEX items_b ON items(b);"
+        "INSERT INTO items VALUES (1, 1), (2, 2), (3, 3);"
+        "ANALYZE;"
+        "UPDATE sqlite_stat1 SET stat = '5 1' WHERE idx = 'items_a';"
+        "UPDATE sqlite_stat1 SET stat = '9 1' WHERE idx = 'items_b';"
+    )
+    connection.commit()
+    connection.close()
+    with SQLiteAdapter(path) as opened:
+        assert opened.list_tables() == [{"name": "items", "type": "table", "row_count": 9}]
 
 
 def test_interrupts_expensive_query(database_path: Path) -> None:
