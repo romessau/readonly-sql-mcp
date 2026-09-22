@@ -21,7 +21,12 @@ def test_lists_tables_and_views(adapter: SQLiteAdapter) -> None:
 
 def test_describes_table(adapter: SQLiteAdapter) -> None:
     description = adapter.describe_table("orders")
-    assert description["columns"][0]["name"] == "id"
+    assert description["columns"][0] == {
+        "name": "id",
+        "type": "INTEGER",
+        "nullable": False,
+        "primary_key": True,
+    }
     assert description["foreign_keys"] == [
         {"column": "customer_id", "referenced_table": "customers", "referenced_column": "id"}
     ]
@@ -35,12 +40,14 @@ def test_rejects_unknown_table(adapter: SQLiteAdapter) -> None:
         adapter.describe_table("unknown")
 
 
-def test_runs_read_query(adapter: SQLiteAdapter) -> None:
+def test_caps_query_rows(adapter: SQLiteAdapter) -> None:
     result = adapter.run_query("SELECT id, name FROM customers ORDER BY id", 1)
-    assert result["columns"] == ["id", "name"]
-    assert result["rows"] == [[1, "Ada"]]
-    assert result["truncated"] is True
-    assert result["message"] == "Result truncated at 1 rows."
+    assert result == {
+        "columns": ["id", "name"],
+        "rows": [[1, "Ada"]],
+        "truncated": True,
+        "message": "Result truncated at 1 rows.",
+    }
 
 
 @pytest.mark.parametrize(
@@ -107,6 +114,26 @@ def test_adapter_reasserts_query_only(adapter: SQLiteAdapter) -> None:
     assert value == 1
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT readfile('/private/secret')",
+        "SELECT writefile('/tmp/readonly-sql-mcp-write', 'x')",
+        "SELECT load_extension('missing')",
+        "SELECT sqlite3_load_extension('missing')",
+    ],
+)
+def test_adapter_sanitizes_dangerous_function_errors(adapter: SQLiteAdapter, sql: str) -> None:
+    with pytest.raises(DatabaseError, match="could not be executed") as caught:
+        adapter.run_query(sql, 10)
+    assert "/private/secret" not in str(caught.value)
+
+
+def test_reports_invalid_query_without_driver_details(adapter: SQLiteAdapter) -> None:
+    with pytest.raises(DatabaseError, match="could not be executed"):
+        adapter.run_query("SELECT * FROM missing", 10)
+
+
 def test_metadata_errors_are_sanitized(adapter: SQLiteAdapter) -> None:
     adapter.close()
     with pytest.raises(DatabaseError, match="metadata could not be read") as list_error:
@@ -115,6 +142,19 @@ def test_metadata_errors_are_sanitized(adapter: SQLiteAdapter) -> None:
         adapter.describe_table("customers")
     assert list_error.value.__cause__ is None
     assert describe_error.value.__cause__ is None
+
+
+def test_interrupts_expensive_query(database_path: Path) -> None:
+    query = """
+        WITH RECURSIVE numbers(value) AS (
+            SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 100000000
+        ) SELECT SUM(value) FROM numbers
+    """
+    with (
+        SQLiteAdapter(database_path, timeout_ms=1) as adapter,
+        pytest.raises(QueryTimeoutError, match="time limit"),
+    ):
+        adapter.run_query(query, 10)
 
 
 @pytest.mark.parametrize("contents", [b"", b"not a sqlite database"])
@@ -142,16 +182,3 @@ def test_uses_maximum_statistical_estimate(tmp_path: Path) -> None:
     connection.close()
     with SQLiteAdapter(path) as opened:
         assert opened.list_tables() == [{"name": "items", "type": "table", "row_count": 9}]
-
-
-def test_interrupts_expensive_query(database_path: Path) -> None:
-    query = """
-        WITH RECURSIVE numbers(value) AS (
-            SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 100000000
-        ) SELECT SUM(value) FROM numbers
-    """
-    with (
-        SQLiteAdapter(database_path, timeout_ms=1) as adapter,
-        pytest.raises(QueryTimeoutError, match="time limit"),
-    ):
-        adapter.run_query(query, 10)
