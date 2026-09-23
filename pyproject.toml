@@ -53,4 +53,3 @@ packages = ["readonly_sql_mcp"]
 [tool.pytest.ini_options]
 addopts = "--cov=readonly_sql_mcp --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
-
