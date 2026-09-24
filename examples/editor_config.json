@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sql": {
+      "command": "readonly-sql-mcp",
+      "env": {
+        "MCP_SQLITE_PATH": "/absolute/path/to/examples/ecommerce.sqlite",
+        "MCP_SQL_ROW_LIMIT": "100"
+      }
+    }
+  }
+}
