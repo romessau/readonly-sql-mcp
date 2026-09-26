@@ -13,6 +13,7 @@ authors = [{ name = "readonly-sql-mcp contributors" }]
 dependencies = [
   "mcp>=1.9,<2",
   "sqlglot>=26,<28",
+  "typing-extensions>=4.9",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

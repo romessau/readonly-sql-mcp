@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypedDict
+from typing import Protocol
+
+from typing_extensions import TypedDict
 
 
 class ColumnInfo(TypedDict):
